@@ -1,7 +1,7 @@
 """Subprocess executor with timeouts, limits, and safe cancellation."""
 import asyncio
 import os
-import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,12 +24,38 @@ def get_clean_env() -> Dict[str, str]:
     for k, v in os.environ.items():
         if k not in SENSITIVE_ENV_VARS and not k.startswith("SSH_") and not "KEY" in k and not "SECRET" in k:
             clean[k] = v
+    # Preserve essential Windows system environment variables
+    if sys.platform == "win32":
+        for essential in ("SystemRoot", "SystemDrive", "PATH", "COMSPEC", "PATHEXT", "TEMP", "TMP"):
+            if essential in os.environ and essential not in clean:
+                clean[essential] = os.environ[essential]
     clean["PYTHONUNBUFFERED"] = "1"
     clean["PYTHONDONTWRITEBYTECODE"] = "1"
     return clean
 
 class ProcessExecutor:
     """Executes commands safely in a background subprocess."""
+
+    @staticmethod
+    def _run_sync(cmd_str: str, cwd: Path, env: Dict[str, str], timeout: float):
+        proc = subprocess.Popen(
+            cmd_str,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            shell=True
+        )
+        try:
+            stdout_data, stderr_data = proc.communicate(timeout=timeout)
+            return proc.returncode, stdout_data, stderr_data, False
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.communicate(timeout=2)
+            except Exception:
+                pass
+            return -1, b"", b"Execution timed out", True
 
     @staticmethod
     async def run(
@@ -48,79 +74,52 @@ class ProcessExecutor:
         # Build command if python
         cmd_str = command
         if is_python:
-            # If the user command already starts with python / python3, run it; otherwise prefix
             parts = command.strip().split()
-            if parts and parts[0] in ("python", "python3", sys.executable):
+            if parts and parts[0] in ("python", "python3"):
+                cmd_str = f'"{sys.executable}" ' + " ".join(parts[1:])
+            elif parts and parts[0] == sys.executable:
                 cmd_str = command
             else:
-                cmd_str = f"{sys.executable} {command}"
-
-        # Setup process group on Unix for clean tree termination
-        is_unix = sys.platform != "win32"
-        preexec = os.setsid if is_unix else None
+                cmd_str = f'"{sys.executable}" {command}'
 
         try:
-            proc = await asyncio.create_subprocess_shell(
+            returncode, stdout_bytes, stderr_bytes, is_timeout = await asyncio.to_thread(
+                ProcessExecutor._run_sync,
                 cmd_str,
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                preexec_fn=preexec
+                cwd,
+                env,
+                float(timeout)
             )
-        except Exception as e:
-            return {
-                "success": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": f"Failed to spawn process: {str(e)}",
-                "duration_ms": int((time.time() - start_time) * 1000)
-            }
 
-        try:
-            stdout_data, stderr_data = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=float(timeout)
-            )
             duration_ms = int((time.time() - start_time) * 1000)
-            stdout = stdout_data.decode("utf-8", errors="replace")
-            stderr = stderr_data.decode("utf-8", errors="replace")
+
+            if is_timeout:
+                return {
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": f"Execution timed out after {timeout} seconds.",
+                    "duration_ms": duration_ms
+                }
+
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
             
             return {
-                "success": proc.returncode == 0,
-                "exit_code": proc.returncode,
+                "success": returncode == 0,
+                "exit_code": returncode,
                 "stdout": truncate_output(stdout),
                 "stderr": truncate_output(stderr),
                 "duration_ms": duration_ms
             }
 
-        except asyncio.TimeoutError:
-            # Kill process tree
-            try:
-                if is_unix and proc.pid:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                else:
-                    proc.kill()
-            except Exception:
-                pass
-            
-            duration_ms = int((time.time() - start_time) * 1000)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
             return {
                 "success": False,
                 "exit_code": -1,
                 "stdout": "",
-                "stderr": f"Execution timed out after {timeout} seconds.",
-                "duration_ms": duration_ms
+                "stderr": f"Failed to execute command: {type(e).__name__}: {str(e)}",
+                "duration_ms": int((time.time() - start_time) * 1000)
             }
-
-        except asyncio.CancelledError:
-            # Task cancelled by user
-            try:
-                if is_unix and proc.pid:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                else:
-                    proc.kill()
-            except Exception:
-                pass
-            raise
-

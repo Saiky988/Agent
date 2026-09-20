@@ -1,9 +1,15 @@
-"""AI Service provider abstraction."""
+"""AI Service provider abstraction with automatic retry and model fallback."""
 import asyncio
+import logging
 from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 from app.config import settings
+
+logger = logging.getLogger("web_agent.ai")
+
+# Fallback models in priority order if the primary model suffers high demand (503) or rate limits (429)
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 class AIResponse:
     """Standardized AI response across providers."""
@@ -45,43 +51,67 @@ class AIService:
     ) -> AIResponse:
         """
         Sends contents to the Gemini model and returns a standardized AIResponse.
-        Uses asyncio.to_thread to prevent blocking the event loop during network requests.
+        Includes automatic retry and fallback to secondary models if Google experiences high demand (503) or rate limit (429).
         """
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             tools=tools or []
         )
 
-        def _call_gemini():
-            return self.client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=config
-            )
+        candidate_models = [self.model]
+        for fb in FALLBACK_MODELS:
+            if fb != self.model:
+                candidate_models.append(fb)
 
-        response = await asyncio.to_thread(_call_gemini)
+        last_error = None
 
-        # Extract tool calls and text
-        tool_calls = []
-        if response.function_calls:
-            for fc in response.function_calls:
-                tool_calls.append({
-                    "name": fc.name,
-                    "arguments": fc.args or {}
-                })
+        for model_to_try in candidate_models:
+            for attempt in range(2):
+                try:
+                    def _call():
+                        return self.client.models.generate_content(
+                            model=model_to_try,
+                            contents=contents,
+                            config=config
+                        )
 
-        text = response.text if response.text else None
-        
-        # In case the candidate content has parts
-        raw_content = None
-        if response.candidates and response.candidates[0].content:
-            raw_content = response.candidates[0].content
+                    response = await asyncio.to_thread(_call)
 
-        return AIResponse(
-            text=text,
-            tool_calls=tool_calls,
-            raw_content=raw_content
-        )
+                    # Extract tool calls and text
+                    tool_calls = []
+                    if response.function_calls:
+                        for fc in response.function_calls:
+                            tool_calls.append({
+                                "name": fc.name,
+                                "arguments": fc.args or {}
+                            })
+
+                    text = response.text if response.text else None
+                    
+                    raw_content = None
+                    if response.candidates and response.candidates[0].content:
+                        raw_content = response.candidates[0].content
+
+                    return AIResponse(
+                        text=text,
+                        tool_calls=tool_calls,
+                        raw_content=raw_content
+                    )
+
+                except Exception as e:
+                    err_str = str(e)
+                    last_error = e
+                    if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        logger.warning(
+                            f"Model {model_to_try} returned high demand/quota error (attempt {attempt + 1}/2): {e}. Retrying/falling back..."
+                        )
+                        await asyncio.sleep(1.5)
+                        continue
+                    else:
+                        raise e
+
+            logger.info(f"Switching to fallback model after {model_to_try} was unavailable/rate limited...")
+
+        raise last_error or RuntimeError("All AI models failed to respond")
 
 ai_service = AIService()
-
