@@ -9,12 +9,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings:
     APP_ENV: str = os.getenv("APP_ENV", "development")
-    HOST: str = os.getenv("HOST", "127.0.0.1")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    HOST: str = os.getenv("HOST", "5.189.132.216")
+    PORT: int = int(os.getenv("PORT", "22230"))
 
     # Gemini
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
     # Agent execution limits
     MAX_CONCURRENT_TASKS: int = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))

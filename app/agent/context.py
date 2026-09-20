@@ -52,7 +52,7 @@ class AgentContext:
         )
         self.contents.append(
             types.Content(
-                role="tool",
+                role="user",
                 parts=[part]
             )
         )

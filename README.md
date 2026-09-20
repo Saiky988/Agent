@@ -91,11 +91,11 @@ Configure via `.env` (use `.env.example` as a template):
 
 ```env
 APP_ENV=production
-HOST=127.0.0.1
-PORT=8000
+HOST=5.189.132.216
+PORT=22230
 
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 
 MAX_CONCURRENT_TASKS=3
 MAX_AGENT_STEPS=30
