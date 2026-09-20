@@ -1,15 +1,20 @@
 """AI Service provider abstraction with automatic retry and model fallback."""
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from google import genai
 from google.genai import types
 from app.config import settings
 
 logger = logging.getLogger("web_agent.ai")
 
-# Fallback models in priority order if the primary model suffers high demand (503) or rate limits (429)
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+# Fallback models in priority order
+FALLBACK_MODELS = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash"
+]
 
 class AIResponse:
     """Standardized AI response across providers."""
@@ -34,6 +39,7 @@ class AIService:
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.model = model or settings.GEMINI_MODEL
         self._client: Optional[genai.Client] = None
+        self._exhausted_models: Set[str] = set()
         if self.api_key:
             self._client = genai.Client(api_key=self.api_key)
 
@@ -51,17 +57,24 @@ class AIService:
     ) -> AIResponse:
         """
         Sends contents to the Gemini model and returns a standardized AIResponse.
-        Includes automatic retry and fallback to secondary models if Google experiences high demand (503) or rate limit (429).
+        Includes automatic retry and fast fallback to secondary models if Google experiences high demand (503) or rate limits (429).
         """
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             tools=tools or []
         )
 
-        candidate_models = [self.model]
+        candidate_models = []
+        # Add primary model if not marked exhausted
+        if self.model not in self._exhausted_models:
+            candidate_models.append(self.model)
         for fb in FALLBACK_MODELS:
-            if fb != self.model:
+            if fb != self.model and fb not in self._exhausted_models:
                 candidate_models.append(fb)
+        # If all candidates exhausted, reset to try again
+        if not candidate_models:
+            self._exhausted_models.clear()
+            candidate_models = [self.model] + [fb for fb in FALLBACK_MODELS if fb != self.model]
 
         last_error = None
 
@@ -101,16 +114,29 @@ class AIService:
                 except Exception as e:
                     err_str = str(e)
                     last_error = e
-                    if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    # If 404 model not found, permanently mark and skip
+                    if "404" in err_str or "NOT_FOUND" in err_str:
+                        logger.warning(f"Model {model_to_try} not found. Skipping.")
+                        self._exhausted_models.add(model_to_try)
+                        break
+                    # If 429 RESOURCE_EXHAUSTED (rate limit / daily quota)
+                    elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                         logger.warning(
-                            f"Model {model_to_try} returned high demand/quota error (attempt {attempt + 1}/2): {e}. Retrying/falling back..."
+                            f"Model {model_to_try} quota exhausted (429). Switching to fallback model."
                         )
-                        await asyncio.sleep(1.5)
+                        self._exhausted_models.add(model_to_try)
+                        break
+                    # If 503 UNAVAILABLE (temporary high demand)
+                    elif "503" in err_str or "UNAVAILABLE" in err_str:
+                        logger.warning(
+                            f"Model {model_to_try} returned high demand (503, attempt {attempt + 1}/2). Retrying..."
+                        )
+                        await asyncio.sleep(1.0)
                         continue
                     else:
                         raise e
 
-            logger.info(f"Switching to fallback model after {model_to_try} was unavailable/rate limited...")
+            logger.info(f"Switching to next model after {model_to_try} was rate limited/unavailable...")
 
         raise last_error or RuntimeError("All AI models failed to respond")
 

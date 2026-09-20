@@ -25,5 +25,7 @@ if __name__ == "__main__":
         "app.main:app",
         host=bind_host,
         port=settings.PORT,
-        reload=settings.APP_ENV == "development"
+        reload=settings.APP_ENV == "development",
+        reload_dirs=["app", "frontend"],
+        reload_excludes=["data/*", "data/**", "*.log"]
     )

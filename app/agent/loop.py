@@ -146,6 +146,8 @@ class AgentLoop:
                         self.context.add_tool_result(tool_name, tool_result)
 
                     # Continue loop to allow model to see tool output and take next step
+                    # Gentle pause to pace requests and respect rate limits
+                    await asyncio.sleep(0.5)
                     continue
 
                 # Model returned a response without tool calls -> Task complete!
