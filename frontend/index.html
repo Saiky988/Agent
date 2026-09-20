@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Web Agent v1</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <div class="app-layout">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-name">Web Agent <span class="version-tag">v1</span></span>
+        </div>
+        <div class="task-indicator" id="task-indicator" style="display: none;">
+          <span class="task-id-badge" id="header-task-id"></span>
+          <span class="status-pill status-queued" id="header-task-status">queued</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="conn-status" id="conn-status">
+          <span class="status-dot disconnected" id="conn-dot"></span>
+          <span class="status-text" id="conn-text">Disconnected</span>
+        </div>
+        <button class="icon-btn mobile-menu-toggle" id="mobile-tasks-toggle" aria-label="Toggle Tasks List">
+          📋
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile View Switcher (visible < 768px) -->
+    <nav class="mobile-tabs" id="mobile-tabs">
+      <button class="mobile-tab-btn active" data-tab="agent-view">💬 Activity</button>
+      <button class="mobile-tab-btn" data-tab="terminal-view">💻 Terminal</button>
+      <button class="mobile-tab-btn" data-tab="tasks-drawer">📋 Tasks</button>
+    </nav>
+
+    <!-- Main Container: Sidebar + Content -->
+    <div class="main-body">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="tasks-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">Tasks</span>
+          <button class="btn btn-sm btn-primary" id="btn-new-task">+ New</button>
+        </div>
+        <div class="task-list" id="task-list">
+          <div class="task-list-empty" id="task-list-empty">No tasks yet</div>
+        </div>
+      </aside>
+
+      <!-- Center / Right Workspace -->
+      <main class="workspace-area">
+        <!-- Agent Activity Stream -->
+        <section class="activity-section" id="agent-view">
+          <div class="activity-header">
+            <span class="section-title">Agent Activity</span>
+            <span class="step-counter" id="step-counter">Step: 0</span>
+          </div>
+          <div class="activity-scroll" id="activity-scroll">
+            <div class="empty-state" id="empty-state">
+              <div class="empty-icon">🤖</div>
+              <h3>Ready to assist</h3>
+              <p>Type an instruction below to start an autonomous coding task.</p>
+              <div class="example-prompts">
+                <button class="prompt-chip" data-prompt="Create a small Python script named hello.py that prints 'Hello from Web Agent', run it, and verify the output.">Hello World script</button>
+                <button class="prompt-chip" data-prompt="Create a Python script that calculates the first 20 Fibonacci numbers, write it to fib.py, execute it, and inspect the output.">Fibonacci calculation</button>
+                <button class="prompt-chip" data-prompt="Create a FastAPI project structure with app/main.py, requirements.txt, and a test script to verify it.">FastAPI project scaffold</button>
+              </div>
+            </div>
+            <div class="messages-container" id="messages-container"></div>
+          </div>
+        </section>
+
+        <!-- Terminal Output Panel -->
+        <section class="terminal-section" id="terminal-view">
+          <div class="terminal-header">
+            <div class="terminal-title">
+              <span class="terminal-icon">❯_</span>
+              <span>Terminal & Process Activity</span>
+            </div>
+            <div class="terminal-actions">
+              <button class="icon-btn-text" id="btn-clear-terminal">Clear</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="terminal-placeholder" id="terminal-placeholder">Process output and shell commands will stream here...</div>
+            <div class="terminal-stream" id="terminal-stream"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Bottom Composer -->
+    <footer class="composer-container">
+      <div class="composer-inner">
+        <textarea
+          id="composer-input"
+          class="composer-textarea"
+          placeholder="Ask the agent to build, inspect, or run code... (Enter to send, Shift+Enter for newline)"
+          rows="1"
+        ></textarea>
+        <div class="composer-controls">
+          <button class="btn btn-danger" id="btn-stop-task" style="display: none;">
+            ■ Stop
+          </button>
+          <button class="btn btn-primary" id="btn-send-task">
+            <span>Send</span> ➔
+          </button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
+
